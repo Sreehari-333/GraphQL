@@ -13,12 +13,30 @@ import (
 	"github.com/google/uuid"
 )
 
+func mapUserDBToGraphQL(u *model.UserDB, posts []*model.PostDB) *model.User {
+	gqlPosts := make([]*model.Post, len(posts))
+	for i, p := range posts {
+		gqlPosts[i] = &model.Post{
+			ID:      p.ID,
+			Title:   p.Title,
+			Content: p.Content,
+			User:    nil, // optional, can fill later
+		}
+	}
+	return &model.User{
+		ID:    u.ID,
+		Name:  u.Name,
+		Email: u.Email,
+		Posts: gqlPosts,
+	}
+}
+
 // CreateUser is the resolver for the createUser field.
-func (r *mutationResolver) CreateUser(ctx context.Context, name string, email string) (*model.User, error) {
+func (r *mutationResolver) CreateUser(ctx context.Context, input model.NewUser) (*model.User, error) {
 	user := &model.User{
-		ID:    uuid.New().String(),
-		Name:  name,
-		Email: email,
+		ID:    uuid.NewString(), // You can use UUID or auto-increment
+		Name:  input.Name,
+		Email: input.Email,
 	}
 
 	if err := r.DB.Create(user).Error; err != nil {
@@ -39,8 +57,26 @@ func (r *mutationResolver) DeleteUser(ctx context.Context, id string) (bool, err
 }
 
 // CreatePost is the resolver for the createPost field.
-func (r *mutationResolver) CreatePost(ctx context.Context, title string, content string, userID string) (*model.Post, error) {
-	panic(fmt.Errorf("not implemented: CreatePost - createPost"))
+func (r *mutationResolver) CreatePost(ctx context.Context, input model.NewPost) (*model.Post, error) {
+	post := &model.Post{
+		Title:   input.Title,
+		Content: input.Content,
+		UserID:  input.UserID,
+	}
+
+	// Save post
+	if err := r.DB.Create(post).Error; err != nil {
+		return nil, err
+	}
+
+	// Load associated user
+	var user model.User
+	if err := r.DB.First(&user, "id = ?", post.UserID).Error; err != nil {
+		return nil, err
+	}
+	post.User = &user
+
+	return post, nil
 }
 
 // UpdatePost is the resolver for the updatePost field.
@@ -64,17 +100,38 @@ func (r *queryResolver) Users(ctx context.Context) ([]*model.User, error) {
 
 // User is the resolver for the user field.
 func (r *queryResolver) User(ctx context.Context, id string) (*model.User, error) {
-	panic(fmt.Errorf("not implemented: User - user"))
+	var userDB model.UserDB
+	// Preload posts so we get them in one query
+	if err := r.DB.Preload("Posts").First(&userDB, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+
+	// Map DB model to GraphQL model
+	postsPtr := make([]*model.PostDB, len(userDB.Posts))
+	for i := range userDB.Posts {
+		postsPtr[i] = &userDB.Posts[i]
+	}
+	user := mapUserDBToGraphQL(&userDB, postsPtr)
+	return user, nil
 }
 
 // Posts is the resolver for the posts field.
 func (r *queryResolver) Posts(ctx context.Context) ([]*model.Post, error) {
-	panic(fmt.Errorf("not implemented: Posts - posts"))
+	var posts []*model.Post
+	if err := r.DB.Preload("User").Find(&posts).Error; err != nil {
+		return nil, err
+	}
+	return posts, nil
 }
 
 // Post is the resolver for the post field.
 func (r *queryResolver) Post(ctx context.Context, id string) (*model.Post, error) {
 	panic(fmt.Errorf("not implemented: Post - post"))
+}
+
+// NewPost is the resolver for the newPost field.
+func (r *subscriptionResolver) NewPost(ctx context.Context) (<-chan *model.Post, error) {
+	panic(fmt.Errorf("not implemented: NewPost - newPost"))
 }
 
 // Mutation returns generated.MutationResolver implementation.
@@ -83,5 +140,9 @@ func (r *Resolver) Mutation() generated.MutationResolver { return &mutationResol
 // Query returns generated.QueryResolver implementation.
 func (r *Resolver) Query() generated.QueryResolver { return &queryResolver{r} }
 
+// Subscription returns generated.SubscriptionResolver implementation.
+func (r *Resolver) Subscription() generated.SubscriptionResolver { return &subscriptionResolver{r} }
+
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
+type subscriptionResolver struct{ *Resolver }
