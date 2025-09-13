@@ -22,8 +22,8 @@ func main() {
 	db.AutoMigrate(&model.User{}, &model.Post{})
 
 	r := &graph.Resolver{
-		DB:         db,
-		PostEvents: make(chan *model.Post, 1),
+		DB:            db,
+		PostObservers: make(map[string]chan *model.Post),
 	}
 
 	srv := handler.NewDefaultServer(generated.NewExecutableSchema(generated.Config{Resolvers: r}))

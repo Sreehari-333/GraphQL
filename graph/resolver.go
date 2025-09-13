@@ -2,6 +2,7 @@ package graph
 
 import (
 	"graphql-demo/graph/model"
+	"sync"
 
 	"gorm.io/gorm"
 )
@@ -11,6 +12,7 @@ import (
 // It serves as dependency injection for your app, add any dependencies you require here.
 
 type Resolver struct {
-	DB         *gorm.DB
-	PostEvents chan *model.Post // For subscription
+	DB             *gorm.DB
+	PostObservers  map[string]chan *model.Post
+	PostObserversM sync.Mutex
 }

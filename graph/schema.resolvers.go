@@ -58,25 +58,52 @@ func (r *mutationResolver) DeleteUser(ctx context.Context, id string) (bool, err
 
 // CreatePost is the resolver for the createPost field.
 func (r *mutationResolver) CreatePost(ctx context.Context, input model.NewPost) (*model.Post, error) {
+	// 1. Save post in DB
 	post := &model.Post{
+		ID:      uuid.NewString(),
 		Title:   input.Title,
 		Content: input.Content,
 		UserID:  input.UserID,
 	}
-
-	// Save post
 	if err := r.DB.Create(post).Error; err != nil {
 		return nil, err
 	}
 
-	// Load associated user
-	var user model.User
-	if err := r.DB.First(&user, "id = ?", post.UserID).Error; err != nil {
-		return nil, err
+	// 2. Notify all subscribers
+	r.PostObserversM.Lock()
+	for _, ch := range r.PostObservers {
+		select {
+		case ch <- post:
+		default:
+			// Skip if subscriber channel is blocked
+		}
 	}
-	post.User = &user
+	r.PostObserversM.Unlock()
 
 	return post, nil
+}
+
+func (r *subscriptionResolver) PostCreated(ctx context.Context) (<-chan *model.Post, error) {
+	id := uuid.NewString()
+	ch := make(chan *model.Post, 1)
+
+	r.PostObserversM.Lock()
+	if r.PostObservers == nil {
+		r.PostObservers = make(map[string]chan *model.Post)
+	}
+	r.PostObservers[id] = ch
+	r.PostObserversM.Unlock()
+
+	// Remove subscriber when context is done
+	go func() {
+		<-ctx.Done()
+		r.PostObserversM.Lock()
+		delete(r.PostObservers, id)
+		r.PostObserversM.Unlock()
+		close(ch)
+	}()
+
+	return ch, nil
 }
 
 // UpdatePost is the resolver for the updatePost field.

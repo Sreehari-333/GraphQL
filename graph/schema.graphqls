@@ -43,3 +43,11 @@ type Mutation {
 type Subscription {
   newPost: Post!
 }
+
+
+type Subscription {
+  postCreated: Post!
+}
+
+
+
